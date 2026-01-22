@@ -6,6 +6,10 @@ Captures video from the laptop camera and tracks faces in real-time.
 2026 01 16 removed listing of available cameras to reduce console clutter
            added print of actual camera resolution after initialization
 2026 01 18 modified to work with Raspberry Pi and GPIOZero servos
+2026 01 21 added profile face detection option to increase speed
+           reduced jpeg quality for web streaming to reduce bandwidth
+           changed servo movement to fixed increments for smoother movement
+              while also reducing sleep time to improve responsiveness
 
 """
 DEBUG = False
@@ -261,7 +265,7 @@ class FaceTracker:
         poi_x_cam = x + w // 2
         poi_y_cam = y + h // 2
 
-        print(f"Largest face center: ({poi_x_cam}, {poi_y_cam})")
+        #print(f"Largest face center: ({poi_x_cam}, {poi_y_cam})")
         
         # Transform to center-origin coordinate system
         # (0,0) at center of frame, positive X to left, positive Y up
@@ -269,25 +273,7 @@ class FaceTracker:
         poi_y_cam_center_origin = (poi_y_cam - (self.cam_frame_height // 2)) * -1  # Camera has Inverted Y
         if DEBUG:
             print(f"Transformed to center origin: ({poi_x_cam_center_origin}, {poi_y_cam_center_origin})")
-        """
-        # Scale transformed_x to servo pan range
-        # Map from [-frame_width/2, frame_width/2] to [SERVO_PAN_MIN, SERVO_PAN_MAX]
-        max_x = self.frame_width // 2
-        if max_x > 0:
-            scaled_x = (transformed_x / max_x) * ((SERVO_PAN_MAX - SERVO_PAN_MIN) / 2)
-            scaled_x = max(SERVO_PAN_MIN, min(SERVO_PAN_MAX, scaled_x))
-        else:
-            scaled_x = 0
         
-        # Scale transformed_y to servo tilt range
-        max_y = self.frame_height // 2
-        if max_y > 0:
-            scaled_y = (transformed_y / max_y) * ((SERVO_TILT_MAX - SERVO_TILT_MIN) / 2)
-            scaled_y = max(SERVO_TILT_MIN, min(SERVO_TILT_MAX, scaled_y))
-        else:
-            scaled_y = 0
-        print(f"Scaled to servo range: ({scaled_x:.3f}, {scaled_y:.3f})")
-        """
         # scale center origin to servo movement increments in FOV units
         scaled_x = poi_x_cam_center_origin  * (HORIZONTAL_FOV_CAM / self.cam_frame_width)
         scaled_y = poi_y_cam_center_origin  * (VERTICAL_FOV_CAM / self.cam_frame_height)
@@ -295,21 +281,37 @@ class FaceTracker:
             print(f"Scaled to FOV increments: ({scaled_x:.3f}, {scaled_y:.3f})")
 
         # convert increments to servo position changes (-1.0 to +1.0)
-        scaled_x_servo = scaled_x / self.cam_frame_width
-        scaled_y_servo = scaled_y / self.cam_frame_height
+        amount_to_move_x = scaled_x / self.cam_frame_width
+        amount_to_move_y = scaled_y / self.cam_frame_height
         if DEBUG:
-            print(f"Scaled to servo position changes: ({scaled_x_servo:.3f}, {scaled_y_servo:.3f})")
+            print(f"Scaled to servo position changes: ({amount_to_move_x:.3f}, {amount_to_move_y:.3f})")
+
+        # TESTING - limit to fixed increment for smoother movement
+        # reduced the sleep at the end of this function
+        # also commented out the print of face detection coordinates above
+        increment = 0.005
+        no_movement_threshold = 0.002
+
+        if poi_x_cam_center_origin > no_movement_threshold:
+            amount_to_move_x = increment
+        else:
+            amount_to_move_x = -increment
+
+        if poi_y_cam_center_origin > no_movement_threshold:
+            amount_to_move_y = increment
+        else:
+            amount_to_move_y = -increment
 
         if DEBUG:
             print(f"Current servo positions before update: ({self.servoPanPos:.3f}, {self.servoTiltPos:.3f})")
         # Move the position relative to current position
-        self.servoPanPos -= scaled_x_servo
+        self.servoPanPos -= amount_to_move_x
         if INVERT_Y_SERVO:
-            scaled_y_servo = -scaled_y_servo
-        self.servoTiltPos += scaled_y_servo
+            amount_to_move_y = -amount_to_move_y
+        self.servoTiltPos += amount_to_move_y
         if DEBUG:
             print(f"Updated servo positions before clamp: ({self.servoPanPos:.3f}, {self.servoTiltPos:.3f})")
-
+        
         # Clamp to servo limits
         self.servoPanPos = max(-.8, min(.8, self.servoPanPos))
         self.servoTiltPos = max(-.8, min(.8, self.servoTiltPos))   
@@ -325,9 +327,10 @@ class FaceTracker:
         try:
             servoPan.value = self.servoPanPos
             servoTilt.value = self.servoTiltPos
-            time.sleep(0.2) # wait for servo to repond before sending new data
         except Exception as e:
             print(f"servo write error: {e}")
+
+        time.sleep(0.001) # wait for servo to repond before sending new data
     
     def draw_faces(self, frame, faces):
         """
