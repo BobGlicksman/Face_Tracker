@@ -9,6 +9,7 @@ Captures video from the laptop camera and tracks faces in real-time.
 
 """
 DEBUG = False
+FACE_PROFILE_DETECTION = False  # Set to True to detect profile faces (slower but more comprehensive)
 
 import cv2
 import sys
@@ -153,25 +154,6 @@ class FaceTracker:
             flags=cv2.CASCADE_SCALE_IMAGE
         )
         
-        # Detect profile faces (left-facing)
-        profile_faces = self.profile_cascade.detectMultiScale(
-            gray,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=(30, 30),
-            flags=cv2.CASCADE_SCALE_IMAGE
-        )
-        
-        # Detect profile faces (right-facing) by flipping the image
-        gray_flipped = cv2.flip(gray, 1)
-        profile_faces_flipped = self.profile_cascade.detectMultiScale(
-            gray_flipped,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=(30, 30),
-            flags=cv2.CASCADE_SCALE_IMAGE
-        )
-        
         # Combine all detections with labels
         all_faces = []
         
@@ -179,15 +161,36 @@ class FaceTracker:
         for (x, y, w, h) in frontal_faces:
             all_faces.append((x, y, w, h, 'frontal'))
         
-        # Add left profile faces
-        for (x, y, w, h) in profile_faces:
-            all_faces.append((x, y, w, h, 'profile-left'))
-        
-        # Add right profile faces (adjust coordinates back from flipped image)
-        frame_width = gray.shape[1]
-        for (x, y, w, h) in profile_faces_flipped:
-            x_corrected = frame_width - x - w
-            all_faces.append((x_corrected, y, w, h, 'profile-right'))
+        # Optionally detect profile faces (slower but detects more faces)
+        if FACE_PROFILE_DETECTION:
+            # Detect profile faces (left-facing)
+            profile_faces = self.profile_cascade.detectMultiScale(
+                gray,
+                scaleFactor=1.1,
+                minNeighbors=5,
+                minSize=(30, 30),
+                flags=cv2.CASCADE_SCALE_IMAGE
+            )
+            
+            # Detect profile faces (right-facing) by flipping the image
+            gray_flipped = cv2.flip(gray, 1)
+            profile_faces_flipped = self.profile_cascade.detectMultiScale(
+                gray_flipped,
+                scaleFactor=1.1,
+                minNeighbors=5,
+                minSize=(30, 30),
+                flags=cv2.CASCADE_SCALE_IMAGE
+            )
+            
+            # Add left profile faces
+            for (x, y, w, h) in profile_faces:
+                all_faces.append((x, y, w, h, 'profile-left'))
+            
+            # Add right profile faces (adjust coordinates back from flipped image)
+            frame_width = gray.shape[1]
+            for (x, y, w, h) in profile_faces_flipped:
+                x_corrected = frame_width - x - w
+                all_faces.append((x_corrected, y, w, h, 'profile-right'))
         
         # Remove overlapping detections
         all_faces = self._remove_overlaps(all_faces)
